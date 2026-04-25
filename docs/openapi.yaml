@@ -1,0 +1,454 @@
+openapi: 3.0.3
+info:
+  title: Ankiced REST API
+  version: "0.1.0"
+  description: Local-first v0.1.0 API for Anki collection maintenance, Web UI, and Wails desktop shell.
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /api/v1/decks:
+    get:
+      summary: List decks
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Deck list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Deck"
+                  total:
+                    type: integer
+                    description: Total number of decks before pagination is applied
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+  /api/v1/decks/search:
+    get:
+      summary: Search decks by substring
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching decks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Deck"
+        "400":
+          description: Invalid query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/decks/{id}:
+    patch:
+      summary: Rename deck
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Deck renamed
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deck not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/notes:
+    get:
+      summary: List notes with filters
+      parameters:
+        - name: deck_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: note_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: search_text
+          in: query
+          schema: { type: string }
+        - name: mod_from
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: mod_to
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Notes list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Note"
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+  /api/v1/notes/{id}:
+    get:
+      summary: Get note by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Note
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoteWithFields"
+    patch:
+      summary: Update note fields
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/NoteField"
+      responses:
+        "200":
+          description: Updated
+  /api/v1/config:
+    get:
+      summary: Return effective runtime config
+      responses:
+        "200":
+          description: Current effective config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config:
+                    $ref: "#/components/schemas/ConfigSnapshot"
+  /api/v1/config/save:
+    post:
+      summary: Save effective config next to the running app
+      responses:
+        "200":
+          description: Config saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  path: { type: string }
+                  config:
+                    $ref: "#/components/schemas/ConfigSnapshot"
+  /api/v1/cleaner/preview:
+    post:
+      summary: Preview cleaner for one note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note_id]
+              properties:
+                note_id:
+                  type: integer
+                  format: int64
+                template_id:
+                  type: string
+      responses:
+        "200":
+          description: Preview records
+  /api/v1/cleaner/dry-run:
+    post:
+      summary: Run cleaner in dry-run mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CleanerRunRequest"
+      responses:
+        "202":
+          description: Dry-run operation accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationAccepted"
+  /api/v1/cleaner/apply:
+    post:
+      summary: Apply cleaner changes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/CleanerRunRequest"
+                - type: object
+                  required: [confirm]
+      responses:
+        "202":
+          description: Apply operation accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationAccepted"
+  /api/v1/operations/{operation_id}:
+    get:
+      summary: Get long-running cleaner operation status
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Operation status and progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationState"
+        "404":
+          description: Operation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/exit:
+    post:
+      summary: Gracefully stop local app process
+      responses:
+        "200":
+          description: Exit requested
+  /api/v1/logs/stream:
+    get:
+      summary: Real-time log stream (SSE)
+      responses:
+        "200":
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /api/v1/logs:
+    get:
+      summary: Incremental log polling fallback
+      description: Returns buffered log events with id greater than since_id. Used as a fallback when SSE is unavailable or unstable, including Wails desktop shell scenarios.
+      parameters:
+        - name: since_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            default: 0
+      responses:
+        "200":
+          description: Buffered log events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LogEvent"
+components:
+  schemas:
+    Deck:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        card_count: { type: integer, format: int64 }
+    Note:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        guid: { type: string }
+        model_id: { type: integer, format: int64 }
+        raw_flds: { type: string }
+        mod: { type: integer, format: int64 }
+        usn: { type: integer }
+    NoteField:
+      type: object
+      properties:
+        name: { type: string }
+        value: { type: string }
+    NoteWithFields:
+      allOf:
+        - $ref: "#/components/schemas/Note"
+        - type: object
+          properties:
+            fields:
+              type: array
+              items:
+                $ref: "#/components/schemas/NoteField"
+    CleanerRunRequest:
+      type: object
+      required: [deck_id]
+      properties:
+        deck_id: { type: integer, format: int64 }
+        full_diff: { type: boolean }
+        confirm: { type: boolean }
+        workers: { type: integer }
+        report_file: { type: string }
+        template_id: { type: string }
+    OperationAccepted:
+      type: object
+      properties:
+        operation_id: { type: string }
+        status:
+          type: string
+          enum: [running]
+        dry_run: { type: boolean }
+        status_url: { type: string }
+    OperationState:
+      type: object
+      properties:
+        operation_id: { type: string }
+        kind: { type: string }
+        status:
+          type: string
+          enum: [running, succeeded, failed]
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        progress:
+          $ref: "#/components/schemas/CleanerProgress"
+        summary:
+          $ref: "#/components/schemas/DryRunSummary"
+        output: { type: string }
+        error:
+          $ref: "#/components/schemas/ErrorResponse"
+    CleanerProgress:
+      type: object
+      properties:
+        total: { type: integer }
+        processed: { type: integer }
+        changed: { type: integer }
+        skipped: { type: integer }
+        errors: { type: integer }
+        stage: { type: string }
+        summary:
+          $ref: "#/components/schemas/DryRunSummary"
+    DryRunSummary:
+      type: object
+      properties:
+        processed: { type: integer }
+        changed: { type: integer }
+        skipped: { type: integer }
+        errors: { type: integer }
+    LogEvent:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        ts: { type: string, format: date-time }
+        level:
+          type: string
+          enum: [info, warn, error]
+        operation: { type: string }
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+        correlation_id: { type: string }
+    ConfigSnapshot:
+      type: object
+      properties:
+        db_path: { type: string }
+        anki_account: { type: string }
+        http_addr: { type: string }
+        backup_keep_last_n: { type: integer }
+        workers: { type: integer }
+        force_apply: { type: boolean }
+        verbose: { type: boolean }
+        full_diff: { type: boolean }
+        report_file: { type: string }
+        default_page_size: { type: integer }
+        pragma_busy_timeout: { type: integer }
+        pragma_journal_mode:
+          type: string
+          enum: [WAL, DELETE, TRUNCATE, MEMORY, OFF, PERSIST]
+        pragma_synchronous:
+          type: string
+          enum: [OFF, NORMAL, FULL, EXTRA]
+    ErrorResponse:
+      type: object
+      properties:
+        message: { type: string }
+        recommended_action: { type: string }
+        code: { type: string }
+        details: { type: string }
+        correlation_id: { type: string }

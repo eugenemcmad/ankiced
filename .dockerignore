@@ -1,0 +1,25 @@
+# Git and IDE
+.git
+.gitignore
+.cursor
+.idea
+.vscode
+
+# Tests and coverage (not needed for production image build)
+**/*_test.go
+coverage.out
+coverage*.out
+
+# Local / generated noise
+bin/
+dist/
+tmp/
+temp/
+*tmp*
+*temp*
+*.exe
+*.test
+*.out
+
+# E2E tests (not needed in image)
+e2e/

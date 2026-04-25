@@ -1,0 +1,1159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ankiced Web</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #151c33;
+      --panel-2: #1c2545;
+      --text: #e8ecff;
+      --muted: #9aa6d1;
+      --accent: #7c9cff;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --line: #2e3a67;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 500px at 0% -10%, #1b2450 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(6px);
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    .title { margin: 0; font-size: 22px; font-weight: 700; }
+    .subtitle { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    .content {
+      padding: 20px 24px 190px;
+      max-width: 1000px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .panel {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      color: #dbe5ff;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    input, button {
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #0f1631;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 14px;
+    }
+    input { min-width: 250px; }
+    .small-input { min-width: 130px; }
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, #3157d1, #294bb8);
+      border-color: #3f64d8;
+      font-weight: 600;
+    }
+    button:hover { filter: brightness(1.08); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 10px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+    #deckRows tr { cursor: pointer; }
+    #deckRows tr:hover { background: rgba(124, 156, 255, 0.12); }
+    th { color: var(--muted); font-weight: 600; }
+    .meta { margin-top: 10px; color: var(--muted); font-size: 13px; }
+    .row-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .open-btn {
+      border: 1px solid #3f64d8;
+      background: #223c95;
+      color: #e7eeff;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .notes-controls {
+      display: flex;
+      gap: 8px;
+      margin: 8px 0 10px;
+      align-items: center;
+    }
+    .notes-controls button {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    .note-edit-btn {
+      border: 1px solid #3f64d8;
+      background: #223c95;
+      color: #e7eeff;
+      border-radius: 8px;
+      padding: 5px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .editor {
+      margin-top: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+    .editor h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: #dbe5ff;
+    }
+    .editor textarea {
+      width: 100%;
+      min-height: 72px;
+      resize: vertical;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0f1631;
+      color: var(--text);
+      padding: 8px;
+      margin-bottom: 8px;
+      font-family: inherit;
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .preview-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f1631;
+      padding: 8px;
+      min-height: 72px;
+      overflow: auto;
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+    .preview-iframe {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f1631;
+      width: 100%;
+      min-height: 72px;
+      display: block;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 8, 20, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      padding: 20px;
+    }
+    .modal-card {
+      width: min(900px, 100%);
+      max-height: 85vh;
+      overflow: auto;
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
+    }
+    .runtime-info {
+      margin: 12px 0 0;
+      font-size: 13px;
+      color: #b9c7f8;
+      background: #0f1631;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .stack {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .output-box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0f1631;
+      color: #dbe5ff;
+      padding: 10px;
+      min-height: 90px;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .working-file {
+      margin: 12px 0 0;
+      font-size: 13px;
+      color: #b9c7f8;
+      background: #0f1631;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .log-console {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 170px;
+      border-top: 1px solid var(--line);
+      background: #090d1b;
+      display: flex;
+      flex-direction: column;
+      z-index: 5;
+    }
+    .log-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #222b4e;
+    }
+    .log-header strong { font-size: 13px; }
+    .chip {
+      border: 1px solid #2a3561;
+      background: #111938;
+      color: #c3cff7;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .chip.active { background: #2a3f88; border-color: #4360c5; color: #fff; }
+    .hidden { display: none; }
+    .log-body {
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      padding: 8px 12px;
+      line-height: 1.45;
+    }
+    .line { white-space: pre-wrap; margin: 0 0 4px; }
+    .line.info { color: #c7d4ff; }
+    .line.warn { color: var(--warn); }
+    .line.error { color: #ff9a9a; }
+    .status { margin-left: auto; font-size: 12px; color: var(--muted); }
+    .exit-btn {
+      margin-left: 8px;
+      border: 1px solid #6a2a39;
+      background: linear-gradient(180deg, #972f44, #7f2638);
+      color: #ffe7ed;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="title">Ankiced Web UI</h1>
+    <p class="subtitle">Local Anki database maintenance console</p>
+  </header>
+  <main class="content">
+    <div class="row-layout">
+      <section class="panel">
+        <h2>Decks</h2>
+        <div class="controls">
+          <input id="searchInput" type="text" placeholder="Search deck by text">
+          <button id="refreshBtn">Refresh</button>
+          <button id="searchBtn">Search</button>
+        </div>
+        <div class="controls">
+          <input id="renameNameInput" type="text" placeholder="New name for selected deck">
+          <button id="renameDeckBtn">Rename Selected Deck</button>
+        </div>
+        <div class="notes-controls">
+          <button id="decksPrevBtn">Prev</button>
+          <button id="decksNextBtn">Next</button>
+          <span class="meta" id="decksPageMeta"></span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Name</th><th>Cards</th><th></th></tr>
+          </thead>
+          <tbody id="deckRows"></tbody>
+        </table>
+        <div class="meta" id="deckMeta">Loading...</div>
+      </section>
+      <section class="panel">
+        <h2>Notes in Deck</h2>
+        <div class="meta" id="notesMeta">Select a deck to view notes.</div>
+        <div class="controls">
+          <input id="noteSearchInput" type="text" placeholder="Filter selected deck by text">
+          <input id="modFromInput" class="small-input" type="number" placeholder="mod from">
+          <input id="modToInput" class="small-input" type="number" placeholder="mod to">
+          <button id="applyNoteFiltersBtn">Apply Filters</button>
+        </div>
+        <div class="controls">
+          <input id="findNoteInput" class="small-input" type="number" placeholder="Note ID">
+          <button id="findNoteBtn">Find Note</button>
+          <input id="globalSearchInput" type="text" placeholder="Global flds search">
+          <button id="globalSearchBtn">Global Search</button>
+        </div>
+        <div class="notes-controls">
+          <button id="notesPrevBtn">Prev</button>
+          <button id="notesNextBtn">Next</button>
+          <span class="meta" id="notesPageMeta"></span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Note ID</th><th>Mod</th><th>Preview</th><th></th></tr>
+          </thead>
+          <tbody id="noteRows"></tbody>
+        </table>
+      </section>
+    </div>
+    <div class="controls" style="margin-top:12px;">
+      <button id="toggleCleanerBtn">Open Cleaner</button>
+    </div>
+    <section id="cleanerPanel" class="panel stack hidden" style="margin-top:12px;">
+      <h2>Cleaner</h2>
+      <div class="controls">
+        <input id="cleanerNoteInput" class="small-input" type="number" placeholder="Note ID for preview">
+        <button id="previewCleanerBtn">Preview Note</button>
+        <input id="cleanerDeckInput" class="small-input" type="number" placeholder="Deck ID">
+        <button id="dryRunCleanerBtn">Dry Run Deck</button>
+        <button id="applyCleanerBtn">Apply Deck</button>
+      </div>
+      <div class="meta" id="cleanerMeta">Run preview or deck cleaner operation.</div>
+      <pre class="output-box" id="cleanerOutput"></pre>
+    </section>
+    <section class="panel stack" style="margin-top:12px;">
+      <h2>Connection &amp; Settings</h2>
+      <div class="working-file">Current Anki DB: <code>{{.DBPath}}</code></div>
+      <div class="meta" id="connectionStatus"></div>
+      <div class="controls">
+        <button id="checkHealthBtn">Check Connection</button>
+        <button id="toggleDBPathBtn">Edit DB Path</button>
+        <button id="showConfigBtn">Show Current Config</button>
+        <button id="saveConfigBtn">Save Config</button>
+      </div>
+      <div class="controls hidden" id="dbPathEditor">
+        <input id="dbPathInput" type="text" value="{{.DBPath}}" aria-label="Database path">
+      </div>
+      <div class="meta" id="configMeta"></div>
+      <pre class="output-box hidden" id="configOutput"></pre>
+    </section>
+  </main>
+
+  <section class="log-console">
+    <div class="log-header">
+      <strong>Realtime Logs</strong>
+      <button class="chip active" data-level="all">all</button>
+      <button class="chip active" data-level="info">info</button>
+      <button class="chip active" data-level="warn">warn</button>
+      <button class="chip active" data-level="error">error</button>
+      <span class="status" id="logStatus">connecting...</span>
+      <button id="copyLogsBtn" class="chip">copy</button>
+      <button id="exitBtn" class="exit-btn">Exit App</button>
+    </div>
+    <div class="log-body" id="logBody"></div>
+  </section>
+
+  <section class="modal" id="noteEditorModal">
+    <div class="modal-card">
+      <div class="editor" id="noteEditor" style="display:block; margin-top:0; border-top:none; padding-top:0;">
+        <h3 id="noteEditorTitle">Edit note</h3>
+        <div id="noteEditorFields"></div>
+        <div class="notes-controls">
+          <button id="saveNoteBtn">Save</button>
+          <button id="cancelEditBtn">Close</button>
+          <span class="meta" id="noteEditorMeta"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const deckRows = document.getElementById("deckRows");
+    const deckMeta = document.getElementById("deckMeta");
+    const searchInput = document.getElementById("searchInput");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const searchBtn = document.getElementById("searchBtn");
+    const renameNameInput = document.getElementById("renameNameInput");
+    const renameDeckBtn = document.getElementById("renameDeckBtn");
+    const decksPrevBtn = document.getElementById("decksPrevBtn");
+    const decksNextBtn = document.getElementById("decksNextBtn");
+    const decksPageMeta = document.getElementById("decksPageMeta");
+    const connectionStatus = document.getElementById("connectionStatus");
+    const checkHealthBtn = document.getElementById("checkHealthBtn");
+    const toggleDBPathBtn = document.getElementById("toggleDBPathBtn");
+    const dbPathEditor = document.getElementById("dbPathEditor");
+    const showConfigBtn = document.getElementById("showConfigBtn");
+    const saveConfigBtn = document.getElementById("saveConfigBtn");
+    const configMeta = document.getElementById("configMeta");
+    const configOutput = document.getElementById("configOutput");
+    const exitBtn = document.getElementById("exitBtn");
+    const copyLogsBtn = document.getElementById("copyLogsBtn");
+    const noteRows = document.getElementById("noteRows");
+    const notesMeta = document.getElementById("notesMeta");
+    const notesPrevBtn = document.getElementById("notesPrevBtn");
+    const notesNextBtn = document.getElementById("notesNextBtn");
+    const notesPageMeta = document.getElementById("notesPageMeta");
+    const noteSearchInput = document.getElementById("noteSearchInput");
+    const modFromInput = document.getElementById("modFromInput");
+    const modToInput = document.getElementById("modToInput");
+    const applyNoteFiltersBtn = document.getElementById("applyNoteFiltersBtn");
+    const findNoteInput = document.getElementById("findNoteInput");
+    const findNoteBtn = document.getElementById("findNoteBtn");
+    const globalSearchInput = document.getElementById("globalSearchInput");
+    const globalSearchBtn = document.getElementById("globalSearchBtn");
+    const toggleCleanerBtn = document.getElementById("toggleCleanerBtn");
+    const cleanerPanel = document.getElementById("cleanerPanel");
+    const cleanerNoteInput = document.getElementById("cleanerNoteInput");
+    const cleanerDeckInput = document.getElementById("cleanerDeckInput");
+    const previewCleanerBtn = document.getElementById("previewCleanerBtn");
+    const dryRunCleanerBtn = document.getElementById("dryRunCleanerBtn");
+    const applyCleanerBtn = document.getElementById("applyCleanerBtn");
+    const cleanerMeta = document.getElementById("cleanerMeta");
+    const cleanerOutput = document.getElementById("cleanerOutput");
+    const noteEditor = document.getElementById("noteEditor");
+    const noteEditorModal = document.getElementById("noteEditorModal");
+    const noteEditorTitle = document.getElementById("noteEditorTitle");
+    const noteEditorFields = document.getElementById("noteEditorFields");
+    const noteEditorMeta = document.getElementById("noteEditorMeta");
+    const saveNoteBtn = document.getElementById("saveNoteBtn");
+    const cancelEditBtn = document.getElementById("cancelEditBtn");
+    const logBody = document.getElementById("logBody");
+    const logStatus = document.getElementById("logStatus");
+    const levelFilters = { info: true, warn: true, error: true };
+    let deckOffset = 0;
+    let decksLimit = {{.PageSize}};
+    let allDecks = [];
+    let decksTotal = 0;
+    let decksSearchMode = "";
+    let currentDeck = null;
+    let currentDeckName = "";
+    let notesOffset = 0;
+    let notesLimit = {{.PageSize}};
+    let currentNotesCount = 0;
+    let editingNoteID = 0;
+    let notesMode = "deck";
+    let forceApply = false;
+
+    async function loadDecks(searchText) {
+      decksSearchMode = searchText || "";
+      deckOffset = 0;
+      await fetchDecksPage();
+    }
+
+    async function fetchDecksPage() {
+      let endpoint;
+      if (decksSearchMode) {
+        endpoint = "/api/v1/decks/search?q=" + encodeURIComponent(decksSearchMode);
+      } else {
+        endpoint = "/api/v1/decks?limit=" + decksLimit + "&offset=" + deckOffset;
+      }
+      deckMeta.textContent = "Loading...";
+      try {
+        const res = await fetch(endpoint);
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "request failed"));
+        }
+        const payload = await res.json();
+        allDecks = Array.isArray(payload.items) ? payload.items : [];
+        decksTotal = typeof payload.total === "number" ? payload.total : allDecks.length;
+        renderDecksPage();
+      } catch (err) {
+        deckRows.innerHTML = "";
+        deckMeta.textContent = "Failed: " + err.message;
+      }
+    }
+
+    function renderDecksPage() {
+      deckRows.innerHTML = "";
+      for (const deck of allDecks) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + deck.id + "</td><td>" + escapeHtml(deck.name) + "</td><td>" + deck.card_count + "</td><td><button class='open-btn' data-deck-id='" + deck.id + "'>Open</button></td>";
+        tr.addEventListener("click", () => openDeck(deck.id, deck.name));
+        tr.querySelector(".open-btn").addEventListener("click", (event) => {
+          event.stopPropagation();
+          openDeck(deck.id, deck.name);
+        });
+        deckRows.appendChild(tr);
+      }
+      const totalLabel = decksSearchMode ? allDecks.length : decksTotal;
+      deckMeta.textContent = "Decks: " + totalLabel;
+      decksPageMeta.textContent = "offset " + deckOffset + " / limit " + decksLimit;
+      decksPrevBtn.disabled = deckOffset <= 0;
+      const lastShown = deckOffset + allDecks.length;
+      const exhausted = decksSearchMode
+        ? true
+        : lastShown >= decksTotal;
+      decksNextBtn.disabled = exhausted;
+    }
+
+    async function checkConnection() {
+      connectionStatus.textContent = "Checking connection...";
+      try {
+        const res = await fetch("/healthz");
+        if (!res.ok) {
+          throw new Error("health check failed");
+        }
+        connectionStatus.textContent = "Connection check succeeded.";
+      } catch (err) {
+        connectionStatus.textContent = "Connection failed: " + err.message;
+      }
+    }
+
+    async function showCurrentConfig() {
+      configMeta.textContent = "Loading config...";
+      configOutput.classList.remove("hidden");
+      try {
+        const res = await fetch("/api/v1/config");
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "config request failed"));
+        }
+        const payload = await res.json();
+        configOutput.textContent = JSON.stringify(payload.config || payload, null, 2);
+        configMeta.textContent = "Current config loaded.";
+      } catch (err) {
+        configMeta.textContent = "Load config failed: " + err.message;
+      }
+    }
+
+    async function saveCurrentConfig() {
+      configMeta.textContent = "Saving config...";
+      try {
+        const res = await fetch("/api/v1/config/save", { method: "POST" });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(formatAPIError(payload, "config save failed"));
+        }
+        configOutput.classList.remove("hidden");
+        configOutput.textContent = JSON.stringify(payload.config || {}, null, 2);
+        configMeta.textContent = "Config saved to " + payload.path;
+      } catch (err) {
+        configMeta.textContent = "Save config failed: " + err.message;
+      }
+    }
+
+    async function renameSelectedDeck() {
+      if (!currentDeck) {
+        deckMeta.textContent = "Select a deck before renaming.";
+        return;
+      }
+      const nextName = renameNameInput.value.trim();
+      if (!nextName) {
+        deckMeta.textContent = "New deck name is required.";
+        return;
+      }
+      try {
+        const res = await fetch("/api/v1/decks/" + encodeURIComponent(currentDeck), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nextName })
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "rename failed"));
+        }
+        currentDeckName = nextName;
+        renameNameInput.value = "";
+        await loadDecks(decksSearchMode);
+        deckMeta.textContent = "Deck renamed.";
+      } catch (err) {
+        deckMeta.textContent = "Rename failed: " + err.message;
+      }
+    }
+
+    function openDeck(deckID, deckName) {
+      currentDeck = deckID;
+      currentDeckName = deckName;
+      cleanerDeckInput.value = String(deckID);
+      notesOffset = 0;
+      hideEditor();
+      loadNotesByDeck();
+    }
+
+    async function loadNotesByDeck() {
+      if (!currentDeck) {
+        return;
+      }
+      notesMode = "deck";
+      notesMeta.textContent = "Loading notes for \"" + currentDeckName + "\"...";
+      noteRows.innerHTML = "";
+      try {
+        const params = new URLSearchParams({
+          deck_id: String(currentDeck),
+          limit: String(notesLimit),
+          offset: String(notesOffset)
+        });
+        if (noteSearchInput.value.trim()) {
+          params.set("search_text", noteSearchInput.value.trim());
+        }
+        if (modFromInput.value.trim()) {
+          params.set("mod_from", modFromInput.value.trim());
+        }
+        if (modToInput.value.trim()) {
+          params.set("mod_to", modToInput.value.trim());
+        }
+        const endpoint = "/api/v1/notes?" + params.toString();
+        const res = await fetch(endpoint);
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "request failed"));
+        }
+        const payload = await res.json();
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        renderNotes(items, "Deck \"" + currentDeckName + "\" notes: " + items.length);
+      } catch (err) {
+        notesMeta.textContent = "Failed: " + err.message;
+      }
+    }
+
+    function renderNotes(items, label) {
+      currentNotesCount = items.length;
+      noteRows.innerHTML = "";
+      for (const note of items) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + note.id + "</td><td>" + note.mod + "</td><td>" + escapeHtml(previewText(note.raw_flds || "")) + "</td><td><button class='note-edit-btn'>Edit</button></td>";
+        tr.querySelector(".note-edit-btn").addEventListener("click", () => openEditor(note.id));
+        noteRows.appendChild(tr);
+      }
+      notesMeta.textContent = label;
+      notesPageMeta.textContent = "offset " + notesOffset + " / limit " + notesLimit;
+      notesPrevBtn.disabled = notesOffset <= 0;
+      notesNextBtn.disabled = currentNotesCount < notesLimit;
+    }
+
+    async function findNoteByID() {
+      const id = findNoteInput.value.trim();
+      if (!id) {
+        notesMeta.textContent = "Note ID is required.";
+        return;
+      }
+      try {
+        const res = await fetch("/api/v1/notes?note_id=" + encodeURIComponent(id) + "&limit=1&offset=0");
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "find failed"));
+        }
+        const payload = await res.json();
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        notesOffset = 0;
+        notesMode = "find";
+        renderNotes(items, "Note ID search results: " + items.length);
+      } catch (err) {
+        notesMeta.textContent = "Find failed: " + err.message;
+      }
+    }
+
+    async function searchNotesGlobally() {
+      const searchText = globalSearchInput.value.trim();
+      if (!searchText) {
+        notesMeta.textContent = "Global search text is required.";
+        return;
+      }
+      try {
+        notesMode = "global";
+        const params = new URLSearchParams({
+          search_text: searchText,
+          limit: String(notesLimit),
+          offset: String(notesOffset)
+        });
+        const res = await fetch("/api/v1/notes?" + params.toString());
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "global search failed"));
+        }
+        const payload = await res.json();
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        renderNotes(items, "Global search results: " + items.length);
+      } catch (err) {
+        notesMeta.textContent = "Global search failed: " + err.message;
+      }
+    }
+
+    async function openEditor(noteID) {
+      noteEditorMeta.textContent = "Loading note...";
+      noteEditorModal.style.display = "flex";
+      noteEditorFields.innerHTML = "";
+      try {
+        const res = await fetch("/api/v1/notes/" + encodeURIComponent(noteID));
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "request failed"));
+        }
+        const note = await res.json();
+        let fields = Array.isArray(note.fields) ? note.fields : [];
+        if (fields.length === 0) {
+          const raw = String(note.raw_flds || "");
+          const parts = raw === "" ? [] : raw.split("\u001f");
+          fields = parts.map((value, idx) => ({ name: "Field " + (idx + 1), value: value }));
+          if (fields.length > 0) {
+            noteEditorMeta.textContent = "Model field metadata is unavailable for this note. Showing raw fields fallback.";
+          }
+        }
+        editingNoteID = noteID;
+        noteEditorTitle.textContent = "Edit note " + noteID;
+        for (const field of fields) {
+          const wrapper = document.createElement("div");
+          const label = document.createElement("div");
+          label.className = "meta";
+          label.textContent = field.name;
+          const grid = document.createElement("div");
+          grid.className = "field-grid";
+          const textarea = document.createElement("textarea");
+          textarea.value = field.value || "";
+          textarea.dataset.fieldName = field.name;
+          const preview = document.createElement("div");
+          preview.className = "preview-box";
+          preview.textContent = textarea.value;
+          const renderedPreview = document.createElement("iframe");
+          renderedPreview.className = "preview-iframe";
+          // sandbox="" disables scripts, plugins, top-navigation and same-origin
+          // access, so arbitrary user HTML from notes can be rendered safely.
+          renderedPreview.setAttribute("sandbox", "");
+          renderedPreview.setAttribute("title", "Rendered preview for " + (field.name || "field"));
+          renderedPreview.srcdoc = renderedPreviewDoc(textarea.value);
+          const previewWrap = document.createElement("div");
+          const previewTitle = document.createElement("div");
+          previewTitle.className = "meta";
+          previewTitle.textContent = "Raw HTML";
+          previewWrap.appendChild(previewTitle);
+          previewWrap.appendChild(preview);
+          const renderedPreviewWrap = document.createElement("div");
+          const renderedPreviewTitle = document.createElement("div");
+          renderedPreviewTitle.className = "meta";
+          renderedPreviewTitle.textContent = "Rendered";
+          renderedPreviewWrap.appendChild(renderedPreviewTitle);
+          renderedPreviewWrap.appendChild(renderedPreview);
+          textarea.addEventListener("input", () => {
+            preview.textContent = textarea.value;
+            renderedPreview.srcdoc = renderedPreviewDoc(textarea.value);
+          });
+          wrapper.appendChild(label);
+          grid.appendChild(textarea);
+          const right = document.createElement("div");
+          right.appendChild(previewWrap);
+          right.appendChild(renderedPreviewWrap);
+          grid.appendChild(right);
+          wrapper.appendChild(grid);
+          noteEditorFields.appendChild(wrapper);
+        }
+        if (fields.length === 0) {
+          noteEditorMeta.textContent = "No editable fields found for this note.";
+        } else if (noteEditorMeta.textContent === "Loading note...") {
+          noteEditorMeta.textContent = "";
+        }
+      } catch (err) {
+        noteEditorMeta.textContent = "Failed: " + err.message;
+      }
+    }
+
+    async function saveCurrentNote() {
+      if (!editingNoteID) {
+        return;
+      }
+      const fields = Array.from(noteEditorFields.querySelectorAll("textarea")).map((el) => ({
+        name: el.dataset.fieldName || "",
+        value: el.value
+      }));
+      noteEditorMeta.textContent = "Saving...";
+      try {
+        const res = await fetch("/api/v1/notes/" + encodeURIComponent(editingNoteID), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields })
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "request failed"));
+        }
+        noteEditorMeta.textContent = "Saved.";
+        await loadNotesByDeck();
+      } catch (err) {
+        noteEditorMeta.textContent = "Save failed: " + err.message;
+      }
+    }
+
+    async function previewCleaner() {
+      const noteID = cleanerNoteInput.value.trim() || String(editingNoteID || "");
+      if (!noteID) {
+        cleanerMeta.textContent = "Note ID is required for preview.";
+        return;
+      }
+      cleanerMeta.textContent = "Running preview...";
+      cleanerOutput.textContent = "";
+      try {
+        const res = await fetch("/api/v1/cleaner/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note_id: Number(noteID) })
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "preview failed"));
+        }
+        const payload = await res.json();
+        const records = Array.isArray(payload.records) ? payload.records : [];
+        cleanerMeta.textContent = "Preview changed fields: " + records.length;
+        cleanerOutput.textContent = records.map((rec) => "note=" + rec.note_id + " field=" + rec.field_name + "\n- " + rec.before + "\n+ " + rec.after).join("\n\n") || "No changes.";
+      } catch (err) {
+        cleanerMeta.textContent = "Preview failed: " + err.message;
+      }
+    }
+
+    async function runCleaner(dryRun) {
+      const deckID = cleanerDeckInput.value.trim() || (currentDeck ? String(currentDeck) : "");
+      if (!deckID) {
+        cleanerMeta.textContent = "Deck ID is required.";
+        return;
+      }
+      if (!dryRun && !forceApply && !window.confirm("Apply cleaner changes to database?")) {
+        cleanerMeta.textContent = "Apply cancelled.";
+        return;
+      }
+      cleanerMeta.textContent = dryRun ? "Starting dry run..." : "Starting apply...";
+      cleanerOutput.textContent = "";
+      try {
+        const endpoint = dryRun ? "/api/v1/cleaner/dry-run" : "/api/v1/cleaner/apply";
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deck_id: Number(deckID), confirm: !dryRun })
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "cleaner request failed"));
+        }
+        const payload = await res.json();
+        cleanerMeta.textContent = "Operation " + payload.operation_id + " started.";
+        await pollOperation(payload.operation_id);
+      } catch (err) {
+        cleanerMeta.textContent = "Cleaner failed: " + err.message;
+      }
+    }
+
+    async function pollOperation(operationID) {
+      for (;;) {
+        const res = await fetch("/api/v1/operations/" + encodeURIComponent(operationID));
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(formatAPIError(payload, "operation status failed"));
+        }
+        const state = await res.json();
+        const progress = state.progress || {};
+        const progressText = progress.total ? " (" + (progress.processed || 0) + "/" + progress.total + ", " + (progress.stage || state.status) + ")" : "";
+        cleanerMeta.textContent = "Operation " + operationID + ": " + state.status + progressText;
+        if (state.status === "succeeded") {
+          cleanerOutput.textContent = state.output || JSON.stringify(state.summary || {}, null, 2);
+          return;
+        }
+        if (state.status === "failed") {
+          cleanerOutput.textContent = state.error ? state.error.details : "Operation failed.";
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    }
+
+    function hideEditor() {
+      editingNoteID = 0;
+      noteEditorModal.style.display = "none";
+      noteEditorFields.innerHTML = "";
+      noteEditorMeta.textContent = "";
+    }
+
+    let lastLogID = 0;
+    let logsPollTimer = null;
+    let logsPollStarted = false;
+
+    function connectLogs() {
+      let gotSSEData = false;
+      const src = new EventSource("/api/v1/logs/stream");
+      const ensurePolling = () => {
+        if (logsPollStarted) return;
+        logsPollStarted = true;
+        logStatus.textContent = "polling";
+        startLogsPolling();
+      };
+      src.onopen = () => {
+        logStatus.textContent = "connected";
+        setTimeout(() => {
+          if (!gotSSEData) {
+            ensurePolling();
+          }
+        }, 2200);
+      };
+      src.onerror = () => {
+        logStatus.textContent = "reconnecting...";
+        ensurePolling();
+      };
+      src.addEventListener("log", (event) => {
+        gotSSEData = true;
+        try {
+          const data = JSON.parse(event.data);
+          appendLog(data);
+        } catch {
+          // ignore malformed log line
+        }
+      });
+    }
+
+    async function pollLogsOnce() {
+      try {
+        const res = await fetch("/api/v1/logs?since_id=" + encodeURIComponent(String(lastLogID)));
+        if (!res.ok) {
+          return;
+        }
+        const payload = await res.json();
+        const items = (payload && Array.isArray(payload.items)) ? payload.items : [];
+        for (const item of items) {
+          appendLog(item);
+        }
+      } catch {
+        // ignore transient polling errors
+      }
+    }
+
+    function startLogsPolling() {
+      if (logsPollTimer) return;
+      pollLogsOnce();
+      logsPollTimer = setInterval(pollLogsOnce, 1000);
+    }
+
+    function appendLog(entry) {
+      const numericID = Number(entry.id || 0);
+      if (numericID > lastLogID) {
+        lastLogID = numericID;
+      }
+      const lvl = (entry.level || "info").toLowerCase();
+      if (lvl in levelFilters && !levelFilters[lvl]) {
+        return;
+      }
+      const line = document.createElement("div");
+      line.className = "line " + lvl;
+      const details = entry.details ? " " + JSON.stringify(entry.details) : "";
+      line.textContent = "[" + (entry.ts || "") + "] " + lvl.toUpperCase() + " " + (entry.operation || "") + " - " + (entry.message || "") + details;
+      logBody.appendChild(line);
+      while (logBody.children.length > 500) {
+        logBody.removeChild(logBody.firstChild);
+      }
+      logBody.scrollTop = logBody.scrollHeight;
+    }
+
+    function setupFilters() {
+      document.querySelectorAll(".chip[data-level]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const level = btn.dataset.level;
+          if (level === "all") {
+            const next = !(levelFilters.info && levelFilters.warn && levelFilters.error);
+            levelFilters.info = next;
+            levelFilters.warn = next;
+            levelFilters.error = next;
+            document.querySelectorAll(".chip[data-level='info'], .chip[data-level='warn'], .chip[data-level='error']")
+              .forEach((n) => n.classList.toggle("active", next));
+            btn.classList.toggle("active", next);
+            return;
+          }
+          levelFilters[level] = !levelFilters[level];
+          btn.classList.toggle("active", levelFilters[level]);
+          const allBtn = document.querySelector(".chip[data-level='all']");
+          const allOn = levelFilters.info && levelFilters.warn && levelFilters.error;
+          allBtn.classList.toggle("active", allOn);
+        });
+      });
+    }
+
+    function escapeHtml(input) {
+      return String(input)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function formatAPIError(payload, fallback) {
+      const message = payload && payload.message ? payload.message : fallback;
+      const action = payload && payload.recommended_action ? " Recommended action: " + payload.recommended_action : "";
+      const cid = payload && payload.correlation_id ? " Correlation ID: " + payload.correlation_id : "";
+      return message + "." + action + cid;
+    }
+
+    function previewText(raw) {
+      const stripped = String(raw).replaceAll("\u001f", " | ").replace(/<[^>]+>/g, "");
+      if (stripped.length > 120) {
+        return stripped.slice(0, 120) + "...";
+      }
+      return stripped;
+    }
+
+    // renderedPreviewDoc wraps a field value into a minimal HTML document used
+    // as srcdoc of a sandboxed iframe. The iframe sandbox attribute disables
+    // scripts and same-origin access, so the document only needs to provide
+    // styling consistent with the app theme.
+    function renderedPreviewDoc(raw) {
+      const styles = "html,body{margin:0;padding:8px;background:#0f1631;color:#e6e8ff;font:13px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;word-wrap:break-word;}img{max-width:100%;height:auto;}";
+      return "<!doctype html><html><head><meta charset=\"utf-8\"><style>" + styles + "</style></head><body>" + String(raw || "") + "</body></html>";
+    }
+
+    refreshBtn.addEventListener("click", () => loadDecks(""));
+    searchBtn.addEventListener("click", () => loadDecks(searchInput.value.trim()));
+    checkHealthBtn.addEventListener("click", () => checkConnection());
+    toggleDBPathBtn.addEventListener("click", () => {
+      const hidden = dbPathEditor.classList.toggle("hidden");
+      toggleDBPathBtn.textContent = hidden ? "Edit DB Path" : "Hide DB Path Editor";
+    });
+    showConfigBtn.addEventListener("click", () => showCurrentConfig());
+    saveConfigBtn.addEventListener("click", () => saveCurrentConfig());
+    renameDeckBtn.addEventListener("click", () => renameSelectedDeck());
+    decksPrevBtn.addEventListener("click", () => {
+      if (deckOffset <= 0) {
+        return;
+      }
+      deckOffset = Math.max(0, deckOffset - decksLimit);
+      if (decksSearchMode) {
+        renderDecksPage();
+      } else {
+        fetchDecksPage();
+      }
+    });
+    decksNextBtn.addEventListener("click", () => {
+      if (decksSearchMode) {
+        return;
+      }
+      if (deckOffset + allDecks.length >= decksTotal) {
+        return;
+      }
+      deckOffset += decksLimit;
+      fetchDecksPage();
+    });
+    notesPrevBtn.addEventListener("click", () => {
+      if (notesOffset <= 0) {
+        return;
+      }
+      notesOffset = Math.max(0, notesOffset - notesLimit);
+      loadNotesByDeck();
+    });
+    notesNextBtn.addEventListener("click", () => {
+      if (currentNotesCount < notesLimit) {
+        return;
+      }
+      notesOffset += notesLimit;
+      if (notesMode === "global") {
+        searchNotesGlobally();
+        return;
+      }
+      loadNotesByDeck();
+    });
+    applyNoteFiltersBtn.addEventListener("click", () => {
+      notesOffset = 0;
+      loadNotesByDeck();
+    });
+    findNoteBtn.addEventListener("click", () => findNoteByID());
+    globalSearchBtn.addEventListener("click", () => {
+      notesOffset = 0;
+      searchNotesGlobally();
+    });
+    toggleCleanerBtn.addEventListener("click", () => {
+      const hidden = cleanerPanel.classList.toggle("hidden");
+      toggleCleanerBtn.textContent = hidden ? "Open Cleaner" : "Hide Cleaner";
+    });
+    previewCleanerBtn.addEventListener("click", () => previewCleaner());
+    dryRunCleanerBtn.addEventListener("click", () => runCleaner(true));
+    applyCleanerBtn.addEventListener("click", () => runCleaner(false));
+    saveNoteBtn.addEventListener("click", () => saveCurrentNote());
+    cancelEditBtn.addEventListener("click", () => hideEditor());
+    noteEditorModal.addEventListener("click", (event) => {
+      if (event.target === noteEditorModal) {
+        hideEditor();
+      }
+    });
+    exitBtn.addEventListener("click", async () => {
+      exitBtn.disabled = true;
+      exitBtn.textContent = "Exiting...";
+      let exitModal = document.getElementById("exitModal");
+      if (!exitModal) {
+         exitModal = document.createElement("div");
+         exitModal.id = "exitModal";
+         exitModal.className = "modal";
+         exitModal.innerHTML = `<div class="modal-card"><div class="editor"><h3 style="color:#ef4444;">Сервер остановлен</h3><p>Можете безопасно закрыть эту вкладку браузера.</p></div></div>`;
+         document.body.appendChild(exitModal);
+      }
+      exitModal.style.display = "flex";
+      try {
+        await fetch("/api/v1/app/exit", { method: "POST" });
+      } catch {
+        // Ignore network errors on shutdown.
+      }
+    });
+    copyLogsBtn.addEventListener("click", async () => {
+      const text = Array.from(logBody.children).map((line) => line.textContent).join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        logStatus.textContent = "logs copied";
+      } catch {
+        logStatus.textContent = "copy failed";
+      }
+    });
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        loadDecks(searchInput.value.trim());
+      }
+    });
+
+    setupFilters();
+    connectLogs();
+    loadRuntimeConfig().finally(() => loadDecks(""));
+
+    async function loadRuntimeConfig() {
+      try {
+        const res = await fetch("/api/v1/config");
+        if (!res.ok) return;
+        const payload = await res.json();
+        const cfg = payload.config || payload;
+        forceApply = Boolean(cfg.force_apply);
+      } catch (err) {
+        // Non-fatal.
+      }
+    }
+  </script>
+</body>
+</html>

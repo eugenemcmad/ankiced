@@ -1,0 +1,11 @@
+db_path: ""
+anki_account: ""
+http_addr: "127.0.0.1:8080"
+backup_keep_last_n: 3
+workers: 4
+force_apply: false
+verbose: false
+full_diff: false
+report_file: ""
+default_page_size: 10
+pragma_busy_timeout: 5000
