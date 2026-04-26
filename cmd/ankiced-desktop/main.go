@@ -60,11 +60,17 @@ func run() error {
 
 	svc := bootstrap.NewServices(cfg, db, nil)
 
+	// shutdownCtx is cancelled from Wails OnShutdown so any in-flight async
+	// operations (cleaner dry-run/apply) tied to the HTTP handler observe
+	// cancellation instead of running past process teardown.
+	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
+	defer cancelShutdown()
+
 	// appCtx is set on the Wails main loop goroutine and read from the HTTP
 	// handler goroutine when the operator hits /api/v1/app/exit. Use an atomic
 	// pointer to avoid a data race on the value.
 	var appCtxPtr atomic.Pointer[context.Context]
-	handler := httpapi.NewHandlerWithExit(svc, cfg, logger, func() {
+	handler := httpapi.NewHandlerWithExit(shutdownCtx, svc, cfg, logger, func() {
 		if ctxPtr := appCtxPtr.Load(); ctxPtr != nil && *ctxPtr != nil {
 			runtime.Quit(*ctxPtr)
 		}
@@ -82,6 +88,7 @@ func run() error {
 			logger.Info("ankiced desktop started")
 		},
 		OnShutdown: func(context.Context) {
+			cancelShutdown()
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), bootstrap.ShutdownTimeout)
 			defer cancel()
 			if cleanupErr := svc.CleanupBackups(cleanupCtx, cfg); cleanupErr != nil {

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"container/list"
 	"sync"
 	"time"
 
@@ -16,6 +17,11 @@ const (
 	operationFailed    operationStatus = "failed"
 )
 
+// defaultOperationStoreCapacity bounds the in-memory operation history to keep
+// memory predictable for long-running web servers. Once exceeded, the oldest
+// non-running operation is evicted.
+const defaultOperationStoreCapacity = 256
+
 type operationState struct {
 	ID         string                 `json:"operation_id"`
 	Kind       string                 `json:"kind"`
@@ -29,12 +35,18 @@ type operationState struct {
 }
 
 type operationStore struct {
-	mu    sync.Mutex
-	items map[string]operationState
+	mu       sync.Mutex
+	items    map[string]*list.Element
+	order    *list.List
+	capacity int
 }
 
 func newOperationStore() *operationStore {
-	return &operationStore{items: make(map[string]operationState)}
+	return &operationStore{
+		items:    make(map[string]*list.Element),
+		order:    list.New(),
+		capacity: defaultOperationStoreCapacity,
+	}
 }
 
 func (s *operationStore) create(id, kind string) operationState {
@@ -46,21 +58,34 @@ func (s *operationStore) create(id, kind string) operationState {
 		Status:    operationRunning,
 		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	s.items[id] = op
+	if existing, ok := s.items[id]; ok {
+		existing.Value = op
+		s.order.MoveToBack(existing)
+		return op
+	}
+	s.items[id] = s.order.PushBack(op)
+	s.evictExcess()
 	return op
 }
 
 func (s *operationStore) get(id string) (operationState, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	op, ok := s.items[id]
-	return op, ok
+	el, ok := s.items[id]
+	if !ok {
+		return operationState{}, false
+	}
+	return el.Value.(operationState), true
 }
 
 func (s *operationStore) succeed(id, output string, summary domain.DryRunSummary) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	op := s.items[id]
+	el, ok := s.items[id]
+	if !ok {
+		return
+	}
+	op := el.Value.(operationState)
 	op.Status = operationSucceeded
 	op.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	op.Output = output
@@ -74,13 +99,18 @@ func (s *operationStore) succeed(id, output string, summary domain.DryRunSummary
 		Stage:     "finished",
 		Summary:   summary,
 	}
-	s.items[id] = op
+	el.Value = op
+	s.evictExcess()
 }
 
 func (s *operationStore) fail(id string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	op := s.items[id]
+	el, ok := s.items[id]
+	if !ok {
+		return
+	}
+	op := el.Value.(operationState)
 	op.Status = operationFailed
 	op.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	progress := op.Progress
@@ -94,13 +124,45 @@ func (s *operationStore) fail(id string, err error) {
 		Details:           presentation.FormatDebugError(err),
 		CorrelationID:     id,
 	}
-	s.items[id] = op
+	el.Value = op
+	s.evictExcess()
 }
 
 func (s *operationStore) progress(id string, progress domain.CleanerProgress) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	op := s.items[id]
+	el, ok := s.items[id]
+	if !ok {
+		return
+	}
+	op := el.Value.(operationState)
 	op.Progress = progress
-	s.items[id] = op
+	el.Value = op
+}
+
+// evictExcess drops the oldest *finished* operations when the store exceeds
+// its capacity. Running operations are preserved so progress polling for
+// active jobs is never lost. Caller must hold s.mu.
+func (s *operationStore) evictExcess() {
+	if s.capacity <= 0 {
+		return
+	}
+	for s.order.Len() > s.capacity {
+		victim := s.findEvictable()
+		if victim == nil {
+			return
+		}
+		op := victim.Value.(operationState)
+		delete(s.items, op.ID)
+		s.order.Remove(victim)
+	}
+}
+
+func (s *operationStore) findEvictable() *list.Element {
+	for el := s.order.Front(); el != nil; el = el.Next() {
+		if el.Value.(operationState).Status != operationRunning {
+			return el
+		}
+	}
+	return nil
 }

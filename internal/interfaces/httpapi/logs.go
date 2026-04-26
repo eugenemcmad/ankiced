@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,8 +34,19 @@ func (h *apiHandler) log(level, operation, cid, message string, details map[stri
 		CorrelationID: cid,
 	}
 	h.logs.Publish(entry)
-	if h.logger != nil {
-		h.logger.Info(message, "level", level, "operation", operation, "correlation_id", cid, "details", details)
+	if h.logger == nil {
+		return
+	}
+	args := []any{"operation", operation, "correlation_id", cid, "details", details}
+	switch strings.ToLower(level) {
+	case "error":
+		h.logger.Error(message, args...)
+	case "warn", "warning":
+		h.logger.Warn(message, args...)
+	case "debug":
+		h.logger.Debug(message, args...)
+	default:
+		h.logger.Info(message, args...)
 	}
 }
 

@@ -29,22 +29,13 @@ func TestLoad_DiscoverRootConfigYAMLAndUseAnkiAccount(t *testing.T) {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
-	origHome := os.Getenv("HOME")
-	origUserProfile := os.Getenv("USERPROFILE")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", origHome)
-		_ = os.Setenv("USERPROFILE", origUserProfile)
-		_ = os.Unsetenv("ANKICED_DB_PATH")
-		_ = os.Unsetenv("ANKICED_ANKI_ACCOUNT")
-	})
-	if err := os.Setenv("HOME", tmpDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	if err := os.Setenv("USERPROFILE", tmpDir); err != nil {
-		t.Fatalf("set USERPROFILE: %v", err)
-	}
-	_ = os.Unsetenv("ANKICED_DB_PATH")
-	_ = os.Unsetenv("ANKICED_ANKI_ACCOUNT")
+	// t.Setenv records the original value and restores it via t.Cleanup so we
+	// don't need to manage env state by hand. Setting an env var to "" is
+	// the supported way to clear it for the duration of the test.
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
+	t.Setenv("ANKICED_DB_PATH", "")
+	t.Setenv("ANKICED_ANKI_ACCOUNT", "")
 
 	cfg, err := Loader{}.Load(context.Background(), nil)
 	if err != nil {

@@ -69,3 +69,23 @@ func TestStripAllTagsHandlesEmptyInput(t *testing.T) {
 		t.Fatalf("expected empty result, got %q", got)
 	}
 }
+
+func TestKeepBasicTagsReencodesEntitiesInTextNodes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"ampersand", `<b>R&amp;D</b>`, `<b>R&amp;D</b>`},
+		{"less-than-encoded", `<i>1 &lt; 2</i>`, `<i>1 &lt; 2</i>`},
+		{"quotes-stay-text", `<u>"q"</u>`, `<u>&#34;q&#34;</u>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyDefault(t, tc.in)
+			if got != tc.want {
+				t.Fatalf("want %q, got %q", tc.want, got)
+			}
+		})
+	}
+}

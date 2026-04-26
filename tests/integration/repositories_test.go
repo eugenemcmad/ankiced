@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"ankiced/internal/application"
@@ -65,7 +66,11 @@ func TestDeckAndNoteFlows(t *testing.T) {
 		t.Fatalf("expected empty list for mod range filter, got %+v", filtered)
 	}
 
-	if _, err := db.SQL.Exec(`INSERT INTO notes(id,guid,mid,flds,mod,usn) VALUES (102,'g3',10,'orphanonly',42,0)`); err != nil {
+	orphanFlds := fmt.Sprintf("orphan%sonly", domain.FieldSeparator)
+	if _, err := db.SQL.Exec(
+		`INSERT INTO notes(id,guid,mid,flds,mod,usn) VALUES (102,'g3',10,?,42,0)`,
+		orphanFlds,
+	); err != nil {
 		t.Fatalf("insert orphan note: %v", err)
 	}
 

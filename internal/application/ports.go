@@ -42,6 +42,10 @@ type DeckRepository interface {
 
 type NoteRepository interface {
 	ListNotes(ctx context.Context, filters domain.FilterSet, page domain.Pagination) ([]domain.Note, error)
+	// CountNotes reports how many notes match the same filters as ListNotes,
+	// ignoring pagination. Used by the HTTP API to surface a paginated total
+	// alongside a single page of items.
+	CountNotes(ctx context.Context, filters domain.FilterSet) (int64, error)
 	GetNote(ctx context.Context, noteID int64) (domain.Note, error)
 	UpdateNote(ctx context.Context, note domain.Note) error
 	ListNoteIDsByDeck(ctx context.Context, deckID int64) ([]int64, error)

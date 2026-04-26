@@ -28,6 +28,19 @@ var allowedImageAttrs = map[string]bool{
 	"height": true,
 }
 
+// allowedImageSchemes whitelists URL schemes that may appear inside an
+// <img src="..."> attribute. Anki collections typically use either bare
+// filenames (which are relative to the media folder, no scheme) or
+// inline base64 data URIs, but we also accept http/https for completeness.
+// Other schemes (`javascript:`, `vbscript:`, `file:`, ...) are rejected to
+// shrink the attack surface when the cleaned HTML is later rendered in a
+// browser/iframe context.
+var allowedImageSchemes = map[string]bool{
+	"http":  true,
+	"https": true,
+	"data":  true,
+}
+
 type HTMLCleanerTemplate struct{}
 
 func (HTMLCleanerTemplate) ID() string { return domain.DefaultActionTemplateID }
@@ -80,7 +93,10 @@ func keepBasicTags(input string) (string, error) {
 func writeNode(b *strings.Builder, n *html.Node) {
 	switch n.Type {
 	case html.TextNode:
-		b.WriteString(n.Data)
+		// The HTML parser decodes entities (e.g. &amp; -> &). Re-encode them
+		// here so the output stays valid HTML and round-trips cleanly when
+		// rendered or re-parsed downstream.
+		b.WriteString(html.EscapeString(n.Data))
 	case html.ElementNode:
 		if allow[n.Data] {
 			if n.Data == "br" {
@@ -116,7 +132,15 @@ func writeImage(b *strings.Builder, n *html.Node) {
 	b.WriteString("<img")
 	for _, attr := range n.Attr {
 		key := strings.ToLower(strings.TrimSpace(attr.Key))
-		if !allowedImageAttrs[key] || strings.TrimSpace(attr.Val) == "" {
+		val := strings.TrimSpace(attr.Val)
+		if !allowedImageAttrs[key] || val == "" {
+			continue
+		}
+		// `src` must use either no scheme (bare media filename) or a
+		// vetted scheme. Other URLs are dropped to avoid `javascript:`
+		// and similar exfil/XSS vectors when the sanitised HTML is
+		// rendered in a browser/iframe.
+		if key == "src" && !isSafeImageSrc(val) {
 			continue
 		}
 		b.WriteString(" ")
@@ -126,4 +150,22 @@ func writeImage(b *strings.Builder, n *html.Node) {
 		b.WriteString(`"`)
 	}
 	b.WriteString(">")
+}
+
+// isSafeImageSrc returns true when val is either a bare path (no URL
+// scheme) or carries a scheme present in allowedImageSchemes. Schemes are
+// matched case-insensitively per RFC 3986 section 3.1.
+func isSafeImageSrc(val string) bool {
+	idx := strings.IndexByte(val, ':')
+	if idx <= 0 {
+		// No scheme present → relative URL or bare media filename.
+		return true
+	}
+	// A leading slash before the first ':' (e.g. `/path:weird`) is a
+	// path, not a scheme; permit it without further checks.
+	if strings.ContainsAny(val[:idx], "/?#") {
+		return true
+	}
+	scheme := strings.ToLower(val[:idx])
+	return allowedImageSchemes[scheme]
 }

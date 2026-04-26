@@ -43,6 +43,9 @@ type stubNoteRepo struct {
 func (s *stubNoteRepo) ListNotes(context.Context, domain.FilterSet, domain.Pagination) ([]domain.Note, error) {
 	return nil, nil
 }
+func (s *stubNoteRepo) CountNotes(context.Context, domain.FilterSet) (int64, error) {
+	return 0, nil
+}
 func (s *stubNoteRepo) GetNote(_ context.Context, noteID int64) (domain.Note, error) {
 	if s.getErrID != 0 && s.getErrID == noteID {
 		return domain.Note{}, errors.New("boom")

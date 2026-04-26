@@ -12,9 +12,15 @@ import (
 )
 
 type DB struct {
-	mu      sync.RWMutex
-	SQL     *sql.DB
-	pragmas Pragmas
+	mu sync.RWMutex
+	// reconnectMu serialises Reconnect calls so two concurrent reconnects
+	// can never race on closing each other's "old" handle. It is held for
+	// the entire reconnect (open/ping/swap/close) and intentionally
+	// distinct from `mu` so read paths are not blocked while a slow
+	// Close() drains.
+	reconnectMu sync.Mutex
+	SQL         *sql.DB
+	pragmas     Pragmas
 }
 
 func (d *DB) Conn() *sql.DB {
@@ -48,6 +54,12 @@ var ErrInvalidJournalMode = errors.New("invalid journal_mode pragma")
 // supplied via configuration.
 var ErrInvalidSynchronous = errors.New("invalid synchronous pragma")
 
+// ErrOldConnCloseFailed is returned by Reconnect when the new connection has
+// already replaced the old one but closing the previous handle failed. The
+// reconnect itself is effectively successful and callers may treat this as a
+// warning.
+var ErrOldConnCloseFailed = errors.New("close previous db connection failed")
+
 func (p Pragmas) normalize() (Pragmas, error) {
 	out := p
 	if out.BusyTimeoutMS <= 0 {
@@ -61,15 +73,38 @@ func (p Pragmas) normalize() (Pragmas, error) {
 		return Pragmas{}, fmt.Errorf("%w: %q", ErrInvalidJournalMode, p.JournalMode)
 	}
 	out.JournalMode = mode
-	sync := strings.ToUpper(strings.TrimSpace(out.Synchronous))
-	if sync == "" {
-		sync = "NORMAL"
+	syncMode := strings.ToUpper(strings.TrimSpace(out.Synchronous))
+	if syncMode == "" {
+		syncMode = "NORMAL"
 	}
-	if _, ok := allowedSynchronous[sync]; !ok {
+	if _, ok := allowedSynchronous[syncMode]; !ok {
 		return Pragmas{}, fmt.Errorf("%w: %q", ErrInvalidSynchronous, p.Synchronous)
 	}
-	out.Synchronous = sync
+	out.Synchronous = syncMode
 	return out, nil
+}
+
+// dsnPathEscaper escapes only the characters that interact with the SQLite
+// URI syntax: '%' (escape introducer), '?' (query separator), '#' (fragment
+// separator) and SP. Other URI-reserved characters such as '/', ':' and '\'
+// are preserved verbatim so Windows-style paths (e.g. `C:\Users\me\db`)
+// still round-trip through the modernc.org/sqlite driver.
+var dsnPathEscaper = strings.NewReplacer(
+	"%", "%25",
+	"?", "%3F",
+	"#", "%23",
+	" ", "%20",
+)
+
+// buildDSN renders a SQLite URI DSN with PRAGMA hints. The path component is
+// minimally escaped so user-controlled paths (which may legally contain '?'
+// or '#') cannot be reinterpreted as query/fragment delimiters by the
+// driver, while leaving conventional path separators intact.
+func buildDSN(path string, p Pragmas) string {
+	return fmt.Sprintf(
+		"file:%s?_pragma=journal_mode(%s)&_pragma=synchronous(%s)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
+		dsnPathEscaper.Replace(path), p.JournalMode, p.Synchronous, p.BusyTimeoutMS,
+	)
 }
 
 // Open opens a SQLite database with the provided pragmas. Journal mode and
@@ -80,10 +115,7 @@ func Open(path string, p Pragmas) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=journal_mode(%s)&_pragma=synchronous(%s)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
-		path, pragmas.JournalMode, pragmas.Synchronous, pragmas.BusyTimeoutMS,
-	)
+	dsn := buildDSN(path, pragmas)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -99,11 +131,21 @@ func Open(path string, p Pragmas) (*DB, error) {
 	return &DB{SQL: db, pragmas: pragmas}, nil
 }
 
+// Reconnect swaps the underlying *sql.DB for one pointing at `path`. The new
+// connection is fully validated (Ping) before the old one is replaced. If
+// closing the old handle fails after a successful swap, the error is returned
+// so the caller (e.g. the HTTP handler) can log it; reconnection itself is
+// considered successful in that case because new requests will use newDB.
+//
+// Concurrent Reconnect calls are serialized by reconnectMu so two callers can
+// never race on closing each other's "old" handle (which would either
+// double-close the same *sql.DB or close a handle that has already been
+// adopted by a different caller).
 func (d *DB) Reconnect(path string) error {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=journal_mode(%s)&_pragma=synchronous(%s)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
-		path, d.pragmas.JournalMode, d.pragmas.Synchronous, d.pragmas.BusyTimeoutMS,
-	)
+	d.reconnectMu.Lock()
+	defer d.reconnectMu.Unlock()
+
+	dsn := buildDSN(path, d.pragmas)
 	newDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return err
@@ -111,7 +153,9 @@ func (d *DB) Reconnect(path string) error {
 	newDB.SetMaxOpenConns(1)
 	newDB.SetMaxIdleConns(1)
 	if err := newDB.Ping(); err != nil {
-		_ = newDB.Close()
+		if closeErr := newDB.Close(); closeErr != nil {
+			return errors.Join(err, fmt.Errorf("close new db after ping failure: %w", closeErr))
+		}
 		return err
 	}
 
@@ -121,7 +165,9 @@ func (d *DB) Reconnect(path string) error {
 	d.mu.Unlock()
 
 	if oldDB != nil {
-		_ = oldDB.Close()
+		if closeErr := oldDB.Close(); closeErr != nil {
+			return fmt.Errorf("%w: %v", ErrOldConnCloseFailed, closeErr)
+		}
 	}
 	return nil
 }

@@ -28,6 +28,20 @@ func (h *apiHandler) writeMessageError(w http.ResponseWriter, status int, messag
 	h.writeAPIError(w, status, message, code, details, cid)
 }
 
+// writeDecodeError translates errors from decodeJSON into the appropriate
+// API error contract entry. It distinguishes "body too large" (raised by
+// http.MaxBytesReader) from generic JSON parsing failures so clients can
+// react to each case differently.
+func (h *apiHandler) writeDecodeError(w http.ResponseWriter, err error, operation string) {
+	cid := h.correlationID()
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		h.writeMessageError(w, http.StatusRequestEntityTooLarge, "request body too large", "REQUEST_BODY_TOO_LARGE", err.Error(), operation, cid)
+		return
+	}
+	h.writeMessageError(w, http.StatusBadRequest, "invalid json body", "INVALID_JSON", err.Error(), operation, cid)
+}
+
 func (h *apiHandler) writeMethodNotAllowed(w http.ResponseWriter, operation string) {
 	cid := h.correlationID()
 	h.writeMessageError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED", "request method is not supported for this endpoint", operation, cid)
@@ -98,6 +112,8 @@ var recommendedActions = map[string]string{
 	"METHOD_NOT_ALLOWED":       "Use the HTTP method documented for this endpoint.",
 	"NOT_FOUND":                "Check the API path and version.",
 	"APP_EXIT_DISABLED":        "Run ankiced-web through the normal application entrypoint to enable exit.",
+	"STREAMING_UNSUPPORTED":    "Use a client that supports HTTP/1.1 streaming or fall back to the polling logs endpoint (?since=).",
+	"REQUEST_BODY_TOO_LARGE":   "Reduce the size of the request body or split it into smaller chunks.",
 }
 
 const defaultRecommendedAction = "Check the technical details and retry the operation."
