@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"ankiced/internal/application"
 	appconfig "ankiced/internal/config"
 	"ankiced/internal/domain"
+	sqliteinfra "ankiced/internal/infrastructure/sqlite"
 	"ankiced/internal/presentation"
 )
 
@@ -36,10 +38,12 @@ func (s Server) Run(ctx context.Context) error {
 		addr = "127.0.0.1:8080"
 	}
 	api := newAPIHandler(s.Svc, s.Cfg, logger, s.OnExit)
+	api.baseCtx = ctx
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           api.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -72,18 +76,47 @@ func (s Server) Run(ctx context.Context) error {
 }
 
 type apiHandler struct {
-	svc    application.Services
-	cfg    appconfig.Settings
-	logger *slog.Logger
-	logs   application.LogBroadcaster
-	ops    *operationStore
-	seq    uint64
-	logSeq uint64
-	onExit func()
+	svc application.Services
+	// cfgMu guards mutable cfg fields that may be updated at runtime
+	// (currently only DBPath via /api/v1/config/save). Other fields are
+	// effectively immutable after handler construction but the lock is held
+	// for the whole snapshot to keep reads consistent.
+	cfgMu sync.RWMutex
+	cfg   appconfig.Settings
+	// baseCtx, when set, is used as the parent context for asynchronous
+	// operations (e.g. cleaner dry-run/apply goroutines). Cancelling it
+	// (typically via Server shutdown) propagates cancellation to in-flight
+	// background work. If nil, context.Background() is used.
+	baseCtx context.Context
+	logger  *slog.Logger
+	logs    application.LogBroadcaster
+	ops     *operationStore
+	seq     uint64
+	logSeq  uint64
+	onExit  func()
+}
+
+func (h *apiHandler) currentCfg() appconfig.Settings {
+	h.cfgMu.RLock()
+	defer h.cfgMu.RUnlock()
+	return h.cfg
+}
+
+func (h *apiHandler) backgroundCtx() context.Context {
+	if h.baseCtx != nil {
+		return h.baseCtx
+	}
+	return context.Background()
+}
+
+func (h *apiHandler) setDBPath(path string) {
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
+	h.cfg.DBPath = path
 }
 
 func newAPIHandler(svc application.Services, cfg appconfig.Settings, logger *slog.Logger, onExit func()) *apiHandler {
-	return &apiHandler{
+	h := &apiHandler{
 		svc:    svc,
 		cfg:    cfg,
 		logger: logger,
@@ -91,14 +124,22 @@ func newAPIHandler(svc application.Services, cfg appconfig.Settings, logger *slo
 		ops:    newOperationStore(),
 		onExit: onExit,
 	}
+	// Wire the dynamic config provider so application services see live
+	// updates to runtime-mutable fields (notably DBPath after Reconnect)
+	// instead of the snapshot captured at handler construction time.
+	h.svc.CfgProvider = h.currentCfg
+	return h
 }
 
-func NewHandler(svc application.Services, cfg appconfig.Settings, logger *slog.Logger) http.Handler {
-	return newAPIHandler(svc, cfg, logger, nil).routes()
-}
-
-func NewHandlerWithExit(svc application.Services, cfg appconfig.Settings, logger *slog.Logger, onExit func()) http.Handler {
-	return newAPIHandler(svc, cfg, logger, onExit).routes()
+// NewHandlerWithExit builds an HTTP handler tied to a base context that
+// propagates shutdown to in-flight asynchronous operations (e.g. cleaner
+// dry-run/apply). Callers that have no shutdown ctx may pass
+// context.Background(); the handler will also internally fall back to
+// Background() when ctx is nil.
+func NewHandlerWithExit(ctx context.Context, svc application.Services, cfg appconfig.Settings, logger *slog.Logger, onExit func()) http.Handler {
+	h := newAPIHandler(svc, cfg, logger, onExit)
+	h.baseCtx = ctx
+	return h.routes()
 }
 
 func (h *apiHandler) routes() http.Handler {
@@ -146,12 +187,13 @@ func (h *apiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	pageSize := h.cfg.DefaultPageSize
+	cfg := h.currentCfg()
+	pageSize := cfg.DefaultPageSize
 	if pageSize <= 0 {
 		pageSize = 10
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := indexTemplate.Execute(w, indexViewModel{DBPath: h.cfg.DBPath, PageSize: pageSize}); err != nil {
+	if err := indexTemplate.Execute(w, indexViewModel{DBPath: cfg.DBPath, PageSize: pageSize}); err != nil {
 		h.logger.Warn("render index template", "error", err)
 	}
 }
@@ -187,15 +229,23 @@ func (h *apiHandler) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 		DBPath string `json:"db_path"`
 	}
 	if err := decodeJSON(r, &req); err == nil && req.DBPath != "" {
-		if req.DBPath != h.cfg.DBPath {
+		if req.DBPath != h.currentCfg().DBPath {
 			if reconnector, ok := h.svc.Tx.(interface{ Reconnect(string) error }); ok {
 				if err := reconnector.Reconnect(req.DBPath); err != nil {
-					h.logger.Error("failed to reconnect to database", "error", err)
-					h.writeError(w, http.StatusInternalServerError, err, "save_config", cid)
-					return
+					// Reconnect can return a non-fatal error after a
+					// successful swap if the *previous* connection failed
+					// to close cleanly. Treat that as a warning so the new
+					// path is still committed.
+					if errors.Is(err, sqliteinfra.ErrOldConnCloseFailed) {
+						h.logger.Warn("reconnect succeeded but old connection close failed", "error", err)
+					} else {
+						h.logger.Error("failed to reconnect to database", "error", err)
+						h.writeError(w, http.StatusInternalServerError, err, "save_config", cid)
+						return
+					}
 				}
 			}
-			h.cfg.DBPath = req.DBPath
+			h.setDBPath(req.DBPath)
 		}
 	}
 
@@ -215,20 +265,21 @@ func (h *apiHandler) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *apiHandler) configSnapshot() configSnapshot {
+	cfg := h.currentCfg()
 	return configSnapshot{
-		DBPath:            h.cfg.DBPath,
-		AnkiAccount:       h.cfg.AnkiAccount,
-		HTTPAddr:          h.cfg.HTTPAddr,
-		BackupKeepLastN:   h.cfg.BackupKeepLastN,
-		Workers:           h.cfg.Workers,
-		ForceApply:        h.cfg.ForceApply,
-		Verbose:           h.cfg.Verbose,
-		FullDiff:          h.cfg.FullDiff,
-		ReportFile:        h.cfg.ReportFile,
-		DefaultPageSize:   h.cfg.DefaultPageSize,
-		PragmaBusyTimeout: h.cfg.PragmaBusyTimeout,
-		PragmaJournalMode: h.cfg.PragmaJournalMode,
-		PragmaSynchronous: h.cfg.PragmaSynchronous,
+		DBPath:            cfg.DBPath,
+		AnkiAccount:       cfg.AnkiAccount,
+		HTTPAddr:          cfg.HTTPAddr,
+		BackupKeepLastN:   cfg.BackupKeepLastN,
+		Workers:           cfg.Workers,
+		ForceApply:        cfg.ForceApply,
+		Verbose:           cfg.Verbose,
+		FullDiff:          cfg.FullDiff,
+		ReportFile:        cfg.ReportFile,
+		DefaultPageSize:   cfg.DefaultPageSize,
+		PragmaBusyTimeout: cfg.PragmaBusyTimeout,
+		PragmaJournalMode: cfg.PragmaJournalMode,
+		PragmaSynchronous: cfg.PragmaSynchronous,
 	}
 }
 
@@ -245,17 +296,27 @@ func (h *apiHandler) handleDecks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	total := len(decks)
-	limit := int(parseInt64Default(r.URL.Query().Get("limit"), 0))
-	offset := int(parseInt64Default(r.URL.Query().Get("offset"), 0))
-	if offset < 0 {
-		offset = 0
-	}
+	rawLimit := parseInt64Default(r.URL.Query().Get("limit"), 0)
+	pg := clampPagination(
+		rawLimit,
+		parseInt64Default(r.URL.Query().Get("offset"), 0),
+		0,
+	)
+	offset := pg.Offset
 	if offset > total {
 		offset = total
 	}
 	page := decks[offset:]
-	if limit > 0 && limit < len(page) {
-		page = page[:limit]
+	// Special-case: handleDecks pre-fetches the entire deck slice so an
+	// unset limit (raw 0) means "return everything from offset"; only
+	// trim when the caller actually requested a positive bound.
+	limit := pg.Limit
+	if rawLimit > 0 {
+		if limit < len(page) {
+			page = page[:limit]
+		}
+	} else {
+		limit = 0
 	}
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"items":  page,
@@ -302,8 +363,7 @@ func (h *apiHandler) handleDeckByID(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		cid := h.correlationID()
-		h.writeMessageError(w, http.StatusBadRequest, "invalid json body", "INVALID_JSON", err.Error(), "rename_deck", cid)
+		h.writeDecodeError(w, err, "rename_deck")
 		return
 	}
 	cid := h.correlationID()
@@ -335,13 +395,11 @@ func (h *apiHandler) handleNotes(w http.ResponseWriter, r *http.Request) {
 		ModFromUnix: parseInt64Default(r.URL.Query().Get("mod_from"), 0),
 		ModToUnix:   parseInt64Default(r.URL.Query().Get("mod_to"), 0),
 	}
-	page := domain.Pagination{
-		Limit:  int(parseInt64Default(r.URL.Query().Get("limit"), int64(h.cfg.DefaultPageSize))),
-		Offset: int(parseInt64Default(r.URL.Query().Get("offset"), 0)),
-	}
-	if page.Limit <= 0 {
-		page.Limit = 10
-	}
+	page := clampPagination(
+		parseInt64Default(r.URL.Query().Get("limit"), int64(h.currentCfg().DefaultPageSize)),
+		parseInt64Default(r.URL.Query().Get("offset"), 0),
+		h.currentCfg().DefaultPageSize,
+	)
 	cid := h.correlationID()
 	h.log("info", "list_notes", cid, "request started", map[string]any{
 		"deck_id": filters.DeckID, "note_id": filters.NoteID, "search_text": filters.SearchText,
@@ -355,8 +413,22 @@ func (h *apiHandler) handleNotes(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, status, err, "list_notes", cid)
 		return
 	}
-	h.writeJSON(w, http.StatusOK, map[string]any{"items": notes, "limit": page.Limit, "offset": page.Offset})
-	h.log("info", "list_notes", cid, "request finished", map[string]any{"count": len(notes)})
+	// total enables the UI to render an accurate page counter; a count
+	// failure is logged but not fatal so the user still gets the page
+	// they asked for. The counted value falls back to len(notes) so the
+	// payload always carries a sensible integer.
+	total, countErr := h.svc.CountNotes(r.Context(), filters)
+	if countErr != nil {
+		h.log("warn", "list_notes", cid, "count failed", map[string]any{"error": presentation.FormatDebugError(countErr)})
+		total = int64(len(notes))
+	}
+	h.writeJSON(w, http.StatusOK, map[string]any{
+		"items":  notes,
+		"total":  total,
+		"limit":  page.Limit,
+		"offset": page.Offset,
+	})
+	h.log("info", "list_notes", cid, "request finished", map[string]any{"count": len(notes), "total": total})
 }
 
 func (h *apiHandler) handleNoteByID(w http.ResponseWriter, r *http.Request) {
@@ -399,8 +471,7 @@ func (h *apiHandler) handlePatchNote(w http.ResponseWriter, r *http.Request, id 
 		Fields []domain.NoteField `json:"fields"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		cid := h.correlationID()
-		h.writeMessageError(w, http.StatusBadRequest, "invalid json body", "INVALID_JSON", err.Error(), "update_note", cid)
+		h.writeDecodeError(w, err, "update_note")
 		return
 	}
 	cid := h.correlationID()
@@ -430,8 +501,7 @@ func (h *apiHandler) handleCleanerPreview(w http.ResponseWriter, r *http.Request
 		TemplateID string `json:"template_id"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		cid := h.correlationID()
-		h.writeMessageError(w, http.StatusBadRequest, "invalid json body", "INVALID_JSON", err.Error(), "cleaner_preview", cid)
+		h.writeDecodeError(w, err, "cleaner_preview")
 		return
 	}
 	cid := h.correlationID()
@@ -478,8 +548,7 @@ func (h *apiHandler) handleCleanerRun(w http.ResponseWriter, r *http.Request, dr
 		Template string `json:"template_id"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		cid := h.correlationID()
-		h.writeMessageError(w, http.StatusBadRequest, "invalid json body", "INVALID_JSON", err.Error(), op, cid)
+		h.writeDecodeError(w, err, op)
 		return
 	}
 	if req.DeckID <= 0 {
@@ -495,7 +564,7 @@ func (h *apiHandler) handleCleanerRun(w http.ResponseWriter, r *http.Request, dr
 
 	cid := h.correlationID()
 	h.log("info", op, cid, "request started", map[string]any{"deck_id": req.DeckID, "dry_run": dryRun})
-	cfg := h.cfg
+	cfg := h.currentCfg()
 	cfg.FullDiff = req.FullDiff
 	cfg.ForceApply = req.Confirm
 	if req.Workers > 0 {
@@ -506,8 +575,21 @@ func (h *apiHandler) handleCleanerRun(w http.ResponseWriter, r *http.Request, dr
 	}
 	operation := h.ops.create(cid, op)
 	go func() {
+		// Recover from any panic in the cleaner pipeline so that a single
+		// pathological note cannot crash the whole HTTP server. The
+		// failed operation is reported back through the standard ops
+		// store so the UI keeps polling and gets a real error.
+		defer func() {
+			if r := recover(); r != nil {
+				err := fmt.Errorf("cleaner operation panicked: %v", r)
+				h.ops.fail(operation.ID, err)
+				h.log("error", op, cid, "operation panicked", map[string]any{"panic": fmt.Sprintf("%v", r)})
+			}
+		}()
 		h.log("info", op, cid, "operation started", map[string]any{"deck_id": req.DeckID, "dry_run": dryRun})
-		out, summary, err := h.svc.RunCleaner(context.Background(), cfg, req.DeckID, dryRun, req.Template, func(progress domain.CleanerProgress) {
+		// Use the handler's base context so server shutdown propagates
+		// cancellation into long-running cleaner work.
+		out, summary, err := h.svc.RunCleaner(h.backgroundCtx(), cfg, req.DeckID, dryRun, req.Template, func(progress domain.CleanerProgress) {
 			h.ops.progress(operation.ID, progress)
 			if progress.Stage == "started" || progress.Stage == "writing" || progress.Stage == "finished" || progress.Stage == "failed" {
 				h.log("info", op, cid, "operation progress", map[string]any{

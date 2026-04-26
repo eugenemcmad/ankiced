@@ -4,7 +4,7 @@
 
 It supports deck inspection, note editing, HTML cleanup, dry-run diffs, and transactional bulk updates with automatic backups.
 
-Current version: `v0.1.0`.
+Current version: `v0.1.1`.
 
 ## Product Direction
 

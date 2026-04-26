@@ -403,6 +403,11 @@ func decodeEscapes(value string) (string, error) {
 	return "", fmt.Errorf("%w: %v", ErrInvalidEscapeSequence, err)
 }
 
+// previewMaxRunes caps the on-screen length of a CLI note preview. Values
+// longer than this are truncated on a rune boundary so multi-byte UTF-8
+// glyphs (Cyrillic, CJK, emoji, ...) never get split mid-codepoint.
+const previewMaxRunes = 80
+
 func previewText(raw string) string {
 	parts := strings.Split(raw, domain.FieldSeparator)
 	cleaned := make([]string, 0, len(parts))
@@ -410,8 +415,9 @@ func previewText(raw string) string {
 		cleaned = append(cleaned, sanitize.StripAllTags(part))
 	}
 	value := strings.Join(cleaned, " | ")
-	if len(value) > 80 {
-		return value[:80] + "..."
+	runes := []rune(value)
+	if len(runes) > previewMaxRunes {
+		return string(runes[:previewMaxRunes]) + "..."
 	}
 	return value
 }

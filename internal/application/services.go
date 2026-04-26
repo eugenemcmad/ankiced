@@ -12,17 +12,29 @@ import (
 )
 
 type Services struct {
-	Cfg       appconfig.Settings
-	Decks     DeckRepository
-	Notes     NoteRepository
-	Models    ModelRepository
-	Backups   BackupStore
-	Confirm   ConfirmPrompter
-	Diff      DiffRenderer
-	Reports   ReportWriter
-	Tx        TransactionManager
-	Templates TemplateRegistry
-	Now       func() time.Time
+	Cfg appconfig.Settings
+	// CfgProvider, when non-nil, returns the *current* effective Settings.
+	// It is consulted in preference to the captured Cfg field for any
+	// runtime-mutable values (notably DBPath, which can change after a live
+	// Reconnect from the HTTP UI). When nil, Cfg is used unchanged.
+	CfgProvider func() appconfig.Settings
+	Decks       DeckRepository
+	Notes       NoteRepository
+	Models      ModelRepository
+	Backups     BackupStore
+	Confirm     ConfirmPrompter
+	Diff        DiffRenderer
+	Reports     ReportWriter
+	Tx          TransactionManager
+	Templates   TemplateRegistry
+	Now         func() time.Time
+}
+
+func (s Services) currentCfg() appconfig.Settings {
+	if s.CfgProvider != nil {
+		return s.CfgProvider()
+	}
+	return s.Cfg
 }
 
 const confirmApplyChangesPrompt = "Apply changes to database?"
@@ -82,7 +94,7 @@ func (s Services) RenameDeck(ctx context.Context, deckID int64, newName string) 
 	if exists {
 		return domain.ErrDeckNameConflict
 	}
-	if err := s.EnsureBackup(ctx, s.Cfg); err != nil {
+	if err := s.EnsureBackup(ctx, s.currentCfg()); err != nil {
 		return err
 	}
 	return s.Decks.RenameDeck(ctx, deckID, strings.TrimSpace(newName))
@@ -90,6 +102,12 @@ func (s Services) RenameDeck(ctx context.Context, deckID int64, newName string) 
 
 func (s Services) ListNotes(ctx context.Context, filters domain.FilterSet, page domain.Pagination) ([]domain.Note, error) {
 	return s.Notes.ListNotes(ctx, filters, page)
+}
+
+// CountNotes mirrors ListNotes filtering but returns the total match count
+// (without pagination) so HTTP/UI callers can render accurate page counters.
+func (s Services) CountNotes(ctx context.Context, filters domain.FilterSet) (int64, error) {
+	return s.Notes.CountNotes(ctx, filters)
 }
 
 func (s Services) GetNote(ctx context.Context, noteID int64) (domain.Note, error) {
@@ -127,7 +145,7 @@ func (s Services) updateNote(ctx context.Context, noteID int64, fields []domain.
 		return err
 	}
 	if createBackup {
-		if err := s.EnsureBackup(ctx, s.Cfg); err != nil {
+		if err := s.EnsureBackup(ctx, s.currentCfg()); err != nil {
 			return err
 		}
 	}
@@ -207,19 +225,29 @@ func (s Services) RunCleaner(ctx context.Context, cfg appconfig.Settings, deckID
 	var wg sync.WaitGroup
 	ctxRun, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// reportErr is shared by workers/feeder to report fatal errors and cancel
+	// the rest of the pipeline. It is safe to call from any goroutine.
+	reportErr := func(err error) {
+		select {
+		case errCh <- err:
+		default:
+		}
+		cancel()
+	}
 	// Worker stage: read + transform notes in parallel.
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					reportErr(fmt.Errorf("cleaner worker panicked: %v", r))
+				}
+			}()
 			for id := range jobs {
 				note, err := s.GetNote(ctxRun, id)
 				if err != nil {
-					select {
-					case errCh <- err:
-					default:
-					}
-					cancel()
+					reportErr(err)
 					return
 				}
 				changed := false
@@ -228,11 +256,7 @@ func (s Services) RunCleaner(ctx context.Context, cfg appconfig.Settings, deckID
 				for _, field := range note.Fields {
 					cleaned, err := template.Apply(field.Value)
 					if err != nil {
-						select {
-						case errCh <- err:
-						default:
-						}
-						cancel()
+						reportErr(err)
 						return
 					}
 					nextFields = append(nextFields, domain.NoteField{Name: field.Name, Value: cleaned})
@@ -249,21 +273,25 @@ func (s Services) RunCleaner(ctx context.Context, cfg appconfig.Settings, deckID
 			}
 		}()
 	}
-	// Feeder stage: push note IDs until done/cancelled.
+	// Feeder stage: push note IDs until done/cancelled. Recover from panics
+	// so a faulty data source cannot escape this goroutine and crash the
+	// surrounding HTTP/CLI process; the panic is converted to errCh.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				reportErr(fmt.Errorf("cleaner feeder panicked: %v", r))
+			}
+			close(jobs)
+			wg.Wait()
+			close(results)
+		}()
 		for _, id := range noteIDs {
 			select {
 			case <-ctxRun.Done():
-				close(jobs)
-				wg.Wait()
-				close(results)
 				return
 			case jobs <- id:
 			}
 		}
-		close(jobs)
-		wg.Wait()
-		close(results)
 	}()
 
 	records := make([]domain.DiffRecord, 0)
@@ -293,7 +321,10 @@ func (s Services) RunCleaner(ctx context.Context, cfg appconfig.Settings, deckID
 		return "", summary, err
 	default:
 	}
-	// Writer stage: apply updates sequentially inside one transaction.
+	// Writer stage: apply updates in batches of `batchSize`, one transaction
+	// per batch, as required by tech-spec 6.7. Each batch commits before the
+	// next begins so memory usage stays bounded and a failed batch leaves
+	// previously committed batches intact.
 	if !dryRun {
 		reportProgress(progress, progressFromSummary(len(noteIDs), "writing", summary))
 		if err := s.EnsureBackup(ctx, cfg); err != nil {

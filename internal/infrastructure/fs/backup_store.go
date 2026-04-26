@@ -15,20 +15,39 @@ import (
 	"ankiced/internal/domain"
 )
 
+// BackupStore creates the per-session SQLite backup at most once per database
+// path. Concurrency is enforced via a per-path *sync.Mutex so two goroutines
+// cannot race past the "already done" check while still allowing different
+// databases to back up in parallel.
 type BackupStore struct {
-	mu         sync.Mutex
-	backupDone map[string]bool
+	mu    sync.Mutex
+	locks map[string]*pathLock
+}
+
+type pathLock struct {
+	mu   sync.Mutex
+	done bool
+}
+
+func (s *BackupStore) lockFor(path string) *pathLock {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locks == nil {
+		s.locks = make(map[string]*pathLock)
+	}
+	pl, ok := s.locks[path]
+	if !ok {
+		pl = &pathLock{}
+		s.locks[path] = pl
+	}
+	return pl
 }
 
 func (s *BackupStore) CreateBackup(_ context.Context, dbPath string, now time.Time) (info domain.BackupInfo, err error) {
-	s.mu.Lock()
-	if s.backupDone == nil {
-		s.backupDone = make(map[string]bool)
-	}
-	done := s.backupDone[dbPath]
-	s.mu.Unlock()
-
-	if done {
+	pl := s.lockFor(dbPath)
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	if pl.done {
 		return domain.BackupInfo{}, nil
 	}
 
@@ -61,11 +80,7 @@ func (s *BackupStore) CreateBackup(_ context.Context, dbPath string, now time.Ti
 		return domain.BackupInfo{}, err
 	}
 	info = domain.BackupInfo{Path: backupPath, CreatedAt: now}
-
-	s.mu.Lock()
-	s.backupDone[dbPath] = true
-	s.mu.Unlock()
-
+	pl.done = true
 	return info, nil
 }
 

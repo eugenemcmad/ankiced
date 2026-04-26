@@ -26,6 +26,10 @@ func (c *captureNoteRepo) ListNotes(_ context.Context, filters domain.FilterSet,
 	return []domain.Note{{ID: 1, Mod: 10, RawFlds: "<b>q</b>\x1f<div>a</div>"}}, nil
 }
 
+func (c *captureNoteRepo) CountNotes(context.Context, domain.FilterSet) (int64, error) {
+	return 1, nil
+}
+
 func (c *captureNoteRepo) GetNote(context.Context, int64) (domain.Note, error) {
 	return domain.Note{}, nil
 }

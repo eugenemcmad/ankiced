@@ -41,9 +41,15 @@ func (JSONReportWriter) WriteReport(_ context.Context, path string, records []do
 	return os.WriteFile(path, data, 0o644)
 }
 
+// clip shortens a string to at most `size` runes (not bytes) so multi-byte
+// UTF-8 sequences (Cyrillic, CJK, emoji) are never split mid-character.
 func clip(value string, size int) string {
-	if len(value) <= size {
+	if size <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= size {
 		return value
 	}
-	return value[:size] + "..."
+	return string(runes[:size]) + "..."
 }

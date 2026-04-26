@@ -17,19 +17,25 @@ import (
 
 type Loader struct{}
 
-func (Loader) Load(_ context.Context, args []string) (appconfig.Settings, error) {
+func (Loader) Load(ctx context.Context, args []string) (appconfig.Settings, error) {
+	// Honour cancellation up front so a caller that abandons startup (e.g.
+	// SIGINT before flags are parsed) gets a deterministic ctx.Err() back
+	// instead of paying for the full parse + file/env scan.
+	if err := ctx.Err(); err != nil {
+		return appconfig.Settings{}, err
+	}
 	fs := flag.NewFlagSet("ankiced", flag.ContinueOnError)
 	var (
-		dbPath         = fs.String("db-path", "", "path to collection.anki2")
-		ankiAccount    = fs.String("anki-account", "", "Anki profile/account folder name")
-		httpAddr       = fs.String("http-addr", "127.0.0.1:8080", "REST API bind address")
-		configPath     = fs.String("config", "", "config file")
-		keepBackups    = fs.Int("backup-keep", 3, "number of backups to keep")
-		workers        = fs.Int("workers", 4, "workers")
-		forceApply     = fs.Bool("force-apply", false, "allow cleaner apply without interactive confirmation")
-		verbose        = fs.Bool("verbose", false, "enable verbose output")
-		fullDiff       = fs.Bool("full-diff", false, "show full diff")
-		reportFile     = fs.String("report-file", "", "path to dry run report")
+		dbPath            = fs.String("db-path", "", "path to collection.anki2")
+		ankiAccount       = fs.String("anki-account", "", "Anki profile/account folder name")
+		httpAddr          = fs.String("http-addr", "127.0.0.1:8080", "REST API bind address")
+		configPath        = fs.String("config", "", "config file")
+		keepBackups       = fs.Int("backup-keep", 3, "number of backups to keep")
+		workers           = fs.Int("workers", 4, "workers")
+		forceApply        = fs.Bool("force-apply", false, "allow cleaner apply without interactive confirmation")
+		verbose           = fs.Bool("verbose", false, "enable verbose output")
+		fullDiff          = fs.Bool("full-diff", false, "show full diff")
+		reportFile        = fs.String("report-file", "", "path to dry run report")
 		pageSize          = fs.Int("page-size", 10, "default pagination page size")
 		busyTimeoutMS     = fs.Int("busy-timeout-ms", 5000, "SQLite busy_timeout in milliseconds")
 		pragmaJournalMode = fs.String("pragma-journal-mode", "WAL", "SQLite journal_mode pragma (WAL|DELETE|TRUNCATE|MEMORY)")
@@ -257,6 +263,11 @@ func merge(dst *appconfig.Settings, src appconfig.Settings) {
 	if strings.TrimSpace(src.PragmaSynchronous) != "" {
 		dst.PragmaSynchronous = strings.TrimSpace(src.PragmaSynchronous)
 	}
+	// Boolean fields use OR-merge so a true value in the file enables the
+	// flag, while a false value preserves the current state. Defaults are
+	// always false on entry, so this is equivalent to a "set if file says
+	// true" semantic. Env vars (applyEnv) and explicit CLI flags can still
+	// override either way because they assign directly after this merge.
 	dst.ForceApply = dst.ForceApply || src.ForceApply
 	dst.Verbose = dst.Verbose || src.Verbose
 	dst.FullDiff = dst.FullDiff || src.FullDiff

@@ -872,8 +872,20 @@
       }
     }
 
-    async function pollOperation(operationID) {
-      for (;;) {
+    // pollOperation polls /api/v1/operations/{id} until it reaches a terminal
+    // state. The wall-clock budget caps how long the UI stays attached to a
+    // possibly stuck server-side job (default 30 minutes); the browser tab
+    // can be closed at any time and the backend operation continues.
+    async function pollOperation(operationID, options) {
+      const opts = options || {};
+      const intervalMs = typeof opts.intervalMs === "number" ? opts.intervalMs : 600;
+      const maxWallMs = typeof opts.maxWallMs === "number" ? opts.maxWallMs : 30 * 60 * 1000;
+      const deadline = Date.now() + maxWallMs;
+      while (true) {
+        if (Date.now() > deadline) {
+          cleanerMeta.textContent = "Operation " + operationID + ": polling timed out (operation continues server-side).";
+          return;
+        }
         const res = await fetch("/api/v1/operations/" + encodeURIComponent(operationID));
         if (!res.ok) {
           const payload = await res.json().catch(() => ({}));
@@ -888,10 +900,13 @@
           return;
         }
         if (state.status === "failed") {
-          cleanerOutput.textContent = state.error ? state.error.details : "Operation failed.";
+          const err = state.error || {};
+          const action = err.recommended_action ? "\nRecommended action: " + err.recommended_action : "";
+          const cid = err.correlation_id ? "\nCorrelation ID: " + err.correlation_id : "";
+          cleanerOutput.textContent = (err.message || "Operation failed.") + action + cid + (err.details ? "\nDetails: " + err.details : "");
           return;
         }
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
       }
     }
 
@@ -1017,8 +1032,21 @@
       return message + "." + action + cid;
     }
 
+    // previewText returns a short plain-text preview of a raw `flds` string.
+    // Tag stripping uses a DOM parser so loose `<` characters in user content
+    // do not get confused with element starts (the prior regex `<[^>]+>` was
+    // naive and could swallow legitimate text segments).
     function previewText(raw) {
-      const stripped = String(raw).replaceAll("\u001f", " | ").replace(/<[^>]+>/g, "");
+      const joined = String(raw).replaceAll("\u001f", " | ");
+      let stripped = joined;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(joined, "text/html");
+        stripped = (doc.body && doc.body.textContent) || joined;
+      } catch (_) {
+        stripped = joined;
+      }
+      stripped = stripped.replace(/\s+/g, " ").trim();
       if (stripped.length > 120) {
         return stripped.slice(0, 120) + "...";
       }

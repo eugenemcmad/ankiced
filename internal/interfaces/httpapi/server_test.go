@@ -80,6 +80,9 @@ type stubNoteRepo struct {
 func (stubNoteRepo) ListNotes(context.Context, domain.FilterSet, domain.Pagination) ([]domain.Note, error) {
 	return []domain.Note{{ID: 100, RawFlds: "front\x1fback", Mod: 1}}, nil
 }
+func (stubNoteRepo) CountNotes(context.Context, domain.FilterSet) (int64, error) {
+	return 1, nil
+}
 func (s stubNoteRepo) GetNote(_ context.Context, id int64) (domain.Note, error) {
 	if s.missing {
 		return domain.Note{}, application.ErrNoteNotFound
@@ -113,7 +116,7 @@ func TestDecksEndpoint(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/decks", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -135,7 +138,7 @@ func TestDecksEndpointHonorsLimitAndOffset(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/decks?limit=2&offset=1", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -168,7 +171,7 @@ func TestDeckSearchEmptyReturnsBadRequest(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/decks/search?q=", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -188,7 +191,7 @@ func TestDeckSearchEmptyReturnsBadRequest(t *testing.T) {
 }
 
 func TestAPIUnknownRouteUsesErrorContract(t *testing.T) {
-	handler := NewHandler(application.Services{}, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), application.Services{}, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/missing", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -210,7 +213,7 @@ func TestAPIUnknownRouteUsesErrorContract(t *testing.T) {
 }
 
 func TestMethodNotAllowedUsesErrorContract(t *testing.T) {
-	handler := NewHandler(application.Services{}, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), application.Services{}, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/decks", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -228,7 +231,7 @@ func TestMethodNotAllowedUsesErrorContract(t *testing.T) {
 
 func TestAppExitInvokesConfiguredCallback(t *testing.T) {
 	exited := make(chan struct{}, 1)
-	handler := NewHandlerWithExit(application.Services{}, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), func() {
+	handler := NewHandlerWithExit(context.Background(), application.Services{}, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), func() {
 		exited <- struct{}{}
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/app/exit", nil)
@@ -360,7 +363,7 @@ func TestRenameDeckEndpoint(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/decks/1", strings.NewReader(`{"name":"Renamed"}`))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -378,7 +381,7 @@ func TestGetNoteMissingReturnsNotFound(t *testing.T) {
 		Notes:  stubNoteRepo{missing: true},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/notes/404", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -401,7 +404,7 @@ func TestRenameDeckEndpointMissingDeckReturnsNotFound(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/decks/404", strings.NewReader(`{"name":"Renamed"}`))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -426,7 +429,7 @@ func TestListNotesEndpoint(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/notes?deck_id=1&limit=10&offset=0", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -448,7 +451,7 @@ func TestCleanerDryRunStartsAsyncOperation(t *testing.T) {
 		Diff:      stubDiff{},
 		Templates: sanitize.NewTemplateRegistry(),
 	}
-	handler := NewHandler(svc, appconfig.Settings{DefaultPageSize: 10, Workers: 1}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DefaultPageSize: 10, Workers: 1}, slog.Default(), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/cleaner/dry-run", strings.NewReader(`{"deck_id":1}`))
 	rr := httptest.NewRecorder()
@@ -503,7 +506,7 @@ func TestIndexContainsWebUIMVPControls(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DBPath: "/tmp/collection.anki2", DefaultPageSize: 13}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DBPath: "/tmp/collection.anki2", DefaultPageSize: 13}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -557,7 +560,7 @@ func TestConfigEndpointReturnsCurrentConfig(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DBPath: "/tmp/collection.anki2", HTTPAddr: "127.0.0.1:9999", Workers: 3}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DBPath: "/tmp/collection.anki2", HTTPAddr: "127.0.0.1:9999", Workers: 3}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -590,7 +593,7 @@ func TestConfigSaveWritesNextToExecutable(t *testing.T) {
 		Notes:  stubNoteRepo{},
 		Models: stubModelRepo{},
 	}
-	handler := NewHandler(svc, appconfig.Settings{DBPath: "/tmp/collection.anki2", HTTPAddr: "127.0.0.1:9999", Workers: 3}, slog.Default())
+	handler := NewHandlerWithExit(context.Background(), svc, appconfig.Settings{DBPath: "/tmp/collection.anki2", HTTPAddr: "127.0.0.1:9999", Workers: 3}, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/save", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
